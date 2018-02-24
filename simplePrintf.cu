@@ -21,7 +21,7 @@
 // helper functions and utilities to work with CUDA
 #include <helper_functions.h>
 #include <helper_cuda.h>
-
+#include <timer.h>
 
 // TCP
 #include <stdlib.h>
@@ -340,35 +340,64 @@ __host__ __device__ void print_hash(unsigned char * buf)
    printf("\n");
    return;
 }
-__host__ __device__ int strLength(char * str)
+__host__ int strlength(char * str)
 {
 
    int count = 0;
    while (str[count] != '\n')
        count ++;
-   printf("\nStrlen of %d", count);
    return count;
 }
 
-__host__ __device__ void strcpy(char * a, char * b)
+
+__device__ int strlengthzero(char * str)
 {
-   for (int i = 0; i < strLength(b); i++){
-       a[i] = b[i];
-       a[i + 1] = '\0';
-   }
-
-
+   int count = 0;
+   while (str[count] != '\0')
+       count ++;
+   return count;
 }
-__device__ void sha256_hash(unsigned char * str)
+
+__device__ void get_ending(unsigned char * buf, int threadID, int offset)
+{
+   int n = 0;
+   char name[9] = {" turtle "};
+   bool first = true;
+   for (int i = 0; i < 8; i++){
+       buf[n] = name[i];
+       n++;
+   }
+    while (threadID != 0 || first){
+       first = false;
+       int nextNum = threadID % 10;
+       unsigned char nextChar = '0' + nextNum;
+       buf[n] = nextChar;
+       n++;
+       threadID = threadID / 10;
+   } 
+   buf[n] = '/';
+   n++;
+   first = true;
+   while (offset != 0 || first) {
+      first = false;
+      int nextNum = offset % 10;
+      unsigned char nextChar = '0' + nextNum;
+      buf[n] = nextChar;
+      n++;
+      offset = offset / 10;
+   }
+   buf[n] = '\0';
+}
+
+__device__ void sha256_hash(unsigned char * str, unsigned char * result, int threadNum, int offset)
 {
       	unsigned char buf[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
 
-        printf("Starting sha hash with string -%s-\n", str);
-        print_hash(str);
+        //printf("Starting sha hash with string -%s-\n", str);
+        //print_hash(str);
         char hash_str[100];
         int n_len = 64;
-        printf("Bit digest \n");
         for (int n = 0; n < 32; n++)
         {
             unsigned int fullBits = (unsigned int) str[n];
@@ -383,12 +412,19 @@ __device__ void sha256_hash(unsigned char * str)
             else
                 hash_str[n * 2 + 1] = 'a' - 10 + rightBit;
         }
-        hash_str[n_len] = '\0';
-        printf("Here is the hash_str: %s\n", hash_str);
+        
+        char ending[36];
+        get_ending((unsigned char*) ending, threadNum, offset);
+        for (int i = 0; i < strlengthzero(ending); i++){
+            hash_str[64 + i] = ending[i];
+            n_len ++;
+        }
+//        printf("Here is the hash_str: %s\n", hash_str);
         sha256_init(&ctx);
 	sha256_update(&ctx, hash_str, n_len);
 	sha256_final(&ctx, (char *) buf);
         int difficulty = 33;
+        //int difficulty = 20;
         bool invalid = false;
 	for (int i = 0; i < 32; i ++){
            unsigned int hexnum = (unsigned int) buf[i];
@@ -406,15 +442,15 @@ __device__ void sha256_hash(unsigned char * str)
            if (invalid || difficulty == 0)
                 break;
         }
-        print_hash(buf);
+        if (offset % 10000 == 0 && threadNum == 0)
+            printf("%s\n",hash_str);
         if (invalid){
-             printf("Not enough work done %d\n", difficulty);
+             //printf("Not enough work done %d\n", difficulty);
              buf[0] = '\0';
-             memcpy(str, buf, SHA256_BLOCK_SIZE);
         }else{
-             printf("YAY you found one");
-             print_hash(buf);
-             memcpy(str, buf, SHA256_BLOCK_SIZE);
+             printf("YAY you found one: %s\n", hash_str);
+
+             memcpy(result, hash_str, n_len);
         }
 }
 
@@ -424,7 +460,7 @@ __host__ void h_sha256_hash(char * str)
       	unsigned char buf[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
 	h_sha256_init(&ctx);
-	h_sha256_update(&ctx, str, strLength(str));
+	h_sha256_update(&ctx, str, strlength(str));
 	h_sha256_final(&ctx, (char *) buf);
         int difficulty = 33;
         bool invalid = false;
@@ -440,38 +476,33 @@ __host__ void h_sha256_hash(char * str)
               }
               if (invalid || difficulty == 0)
                   break;
-              //printf("%d", ((unsigned int) buf[i]) & j); 
            }
            if (invalid || difficulty == 0)
                 break;
-           //printf("%d", (unsigned char*) buf[i]);
-           //printf("\nNext Bits\n");
         }
-        printf("Printing hash \n");
-        print_hash(buf);
-        printf("Finished printing hash");
         if (invalid){
-             printf("Not enough work done %d\n", difficulty);
              buf[0] = '\0';
-            
              memcpy(str, buf, SHA256_BLOCK_SIZE);
         }else{
-             printf("enough work done to satisfy difficulty \n");
+             //printf("enough work done to satisfy difficulty \n");
              memcpy(str, buf, SHA256_BLOCK_SIZE);
         }
 }
 
 
-__global__ void testKernel(unsigned char *var)
+__global__ void testKernel(unsigned char *var, unsigned char * result, int offset)
 {   
-    printf("Yay in gpu mode\n");
-    print_hash((unsigned char*)var);
-//    printf("[%d, %d]:\t\tValue is:%s\n",\
-//            blockIdx.y*gridDim.x+blockIdx.x,\
-//            threadIdx.z*blockDim.x*blockDim.y+threadIdx.y*blockDim.x+threadIdx.x,\
-//            (char*)var);
-    sha256_hash(var);
-    printf("End kernel");
+    bool first = true; 
+    while (offset % 10000 != 0 || first)
+    {
+        first = false;
+        int threadNum = blockDim.x * blockIdx.x + threadIdx.x;
+        //printf("Yay in gpu mode, Thread: %d\n", threadNum);
+        sha256_hash(var, result, threadNum,  offset);
+        offset ++;
+        if (result[0] != '\0')
+            break;
+    }
 }
 
 /* 
@@ -481,6 +512,75 @@ void error(char *msg) {
     perror(msg);
     exit(0);
 }
+
+void sendBlock(char * block)
+{
+
+    int sockfd, portno, n;
+    struct sockaddr_in serveraddr;
+    struct hostent *server;
+    char *hostname;
+    char buf[BUFSIZE];
+
+    /* check command line arguments */
+//    if (argc != 3) {
+//       fprintf(stderr,"usage: %s <hostname> <port>\n", argv[0]);
+      // exit(0);
+//    }
+//    hostname = argv[1];
+    hostname = (char*) "localhost\0";
+    hostname = (char*) "hubris.media.mit.edu\0";
+//    portno = atoi(argv[2]);
+    portno = 6262;
+
+    /* socket: create the socket */
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+        error((char *) "ERROR opening socket");
+    printf("Opened socket\n");
+    /* gethostbyname: get the server's DNS entry */
+    server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+        exit(0);
+    }
+
+    /* build the server's Internet address */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr,
+          (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+    serveraddr.sin_port = htons(portno);
+
+    /* connect: create a connection with the server */
+    if (connect(sockfd, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0)
+      error((char *) "ERROR connecting");
+
+    /* get message line from the user */
+//    printf("Please enter msg: ");
+    //fgets(buf, BUFSIZE, stdin);
+    /* send the message line to the server */
+    bzero(buf, BUFSIZE);  
+    sprintf(buf, "%s\n", block);
+    printf("Wrote result to buf\n");
+    n = write(sockfd, buf, strlen(buf));
+    if (n < 0)
+      error((char *) "ERROR writing to socket");
+
+    /* print the server's reply */
+    bzero(buf, BUFSIZE);
+    n = read(sockfd, buf, BUFSIZE);
+    if (n < 0)
+      error((char *) "ERROR reading from socket");
+    printf("Returned tip: %s-----------", buf);
+    close(sockfd);
+    return;
+
+
+
+
+}
+
 
 void getTip(char * buf){
     int sockfd, portno, n;
@@ -538,14 +638,25 @@ void getTip(char * buf){
     n = read(sockfd, buf, BUFSIZE);
     if (n < 0)
       error((char *) "ERROR reading from socket");
-    printf("Returned tip: %s-----------", buf);
+    printf("Returned tip: %s", buf);
     close(sockfd);
     return;
-
 }
 
 int main(int argc, char **argv)
 {
+    
+    int GPU_N;
+    checkCudaErrors(cudaGetDeviceCount(&GPU_N));
+    printf("CUDA-capable device count: %i\n", GPU_N);
+
+
+
+
+
+
+
+
     int devID;
     cudaDeviceProp props;
 
@@ -558,32 +669,25 @@ int main(int argc, char **argv)
     printf("Device %d: \"%s\" with Compute %d.%d capability\n",
            devID, props.name, props.major, props.minor);
 
-    printf("printf() is called. Output:\n\n");
 
-//    printf("SHA-256 tests: %s\n", sha256_test() ? "SUCCEEDED" : "FAILED");
-
-
-    //Kernel configuration, where a two-dimensional grid and
-    //three-dimensional blocks are configured.
-//    dim3 dimGrid(2, 2);
-//    dim3 dimBlock(2, 2, 2);
-//    testKernel<<<dimGrid, dimBlock>>>(10);
+    int offset = 0;
+    char *lastTip = (char*) malloc(BUFSIZE);
+    bzero(lastTip, BUFSIZE);
+  while(true){
     char *tip = (char*) malloc(BUFSIZE);
     unsigned char * h_tip = (unsigned char*) malloc(SHA256_BLOCK_SIZE);
-//    printf("Gettin tip");
     getTip(tip);
-//    for (int i=0; i < 100; i++)
-//       printf("%d_", tip[i]);
-//    printf("\n");
-
+    if (tip[14] != lastTip[14])
+    {
+        printf("Last tip - %s\n", lastTip);
+        printf("New tip  - %s\n", tip);
+        offset = 0;
+        printf("Got new Tip \n ");
+    }
+    strcpy(lastTip, tip);
     h_sha256_hash(tip);
-//    for (int i= 0; i < SHA256_BLOCK_SIZE; i++)
-//        printf("%d_", tip[i]);
-//    printf("\n");
-//    h_tip = (unsigned char *) tip;
+
     memcpy(h_tip, tip, SHA256_BLOCK_SIZE);
-    print_hash((unsigned char*)tip);
-    print_hash(h_tip);
     unsigned char* d_tip = NULL;
     cudaError_t err = cudaSuccess;    
     err = cudaMalloc((void **)&d_tip, SHA256_BLOCK_SIZE);
@@ -600,9 +704,41 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-
-    testKernel<<<1,1>>>(d_tip);
+    unsigned char * result = NULL;
+    unsigned char *h_result = (unsigned char*) malloc(100);
+    bzero(h_result, 100);
+    err = cudaMalloc((void **)&result, 100);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate device vector A (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }    
+    
+    err = cudaMemcpy(result, h_result, 100, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to copy vector A from host to device (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+    StartTimer();
+    testKernel<<<512,256>>>(d_tip, result, offset);
+    offset += 10000;
     cudaDeviceSynchronize();
-    return EXIT_SUCCESS;
+    printf("  GPU Processing time: %f (ms)\n\n", GetTimer());
+    
+    bzero(h_result, 100);
+    err = cudaMemcpy(h_result, result, 100, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to copy vector A from host to device (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+
+    if (h_result[0] != '\0')
+    {
+        printf("result detected: %s\n", h_result);
+        sendBlock((char*) h_result);
+    }
+  }
 }
 
