@@ -361,81 +361,55 @@ __host__ __device__ void strcpy(char * a, char * b)
 }
 __device__ void sha256_hash(unsigned char * str)
 {
-	unsigned char text1[] = {"000000004c6fe27a1151135df1b1f5d36bc37b6455106e2fc64a8affb4518ddc"}; 
-//	char text2[] = {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"};
-//	char text3[] = {"aaaaaaaaaa"};
-//	char hash1[SHA256_BLOCK_SIZE] = {0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
-//	                                 0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
-//	char hash2[SHA256_BLOCK_SIZE] = {0x24,0x8d,0x6a,0x61,0xd2,0x06,0x38,0xb8,0xe5,0xc0,0x26,0x93,0x0c,0x3e,0x60,0x39,
-//	                                 0xa3,0x3c,0xe4,0x59,0x64,0xff,0x21,0x67,0xf6,0xec,0xed,0xd4,0x19,0xdb,0x06,0xc1};
-//	char hash3[SHA256_BLOCK_SIZE] = {0xcd,0xc7,0x6e,0x5c,0x99,0x14,0xfb,0x92,0x81,0xa1,0xc7,0xe2,0x84,0xd7,0x3e,0x67,
-//	                                 0xf1,0x80,0x9a,0x48,0xa4,0x97,0x20,0x0e,0x04,0x6d,0x39,0xcc,0xc7,0x11,0x2c,0xd0};
       	unsigned char buf[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
-//        str  = "00000000308971eee4b34bf76a3eda47bbfbdf1d0cf407a5ed6daf182f4b23b8"; 
-	//int idx;
-	//int pass = 1;
-        
+
         printf("Starting sha hash with string -%s-\n", str);
         print_hash(str);
-        printf("HERE");
         char hash_str[100];
-        int n = 0;
-        while (str[n] != '\0' || n < SHA256_BLOCK_SIZE)
+        int n_len = 64;
+        printf("Bit digest \n");
+        for (int n = 0; n < 32; n++)
         {
-            hash_str[n] = (char) str[n];
-            n ++;
+            unsigned int fullBits = (unsigned int) str[n];
+            unsigned int leftBit = (fullBits >> 4);
+            unsigned int rightBit = (fullBits & 0xF);
+            if (leftBit < 10)
+                hash_str[n * 2] = '0' + leftBit;
+            else
+                hash_str[n * 2] = 'a' - 10 + leftBit;
+            if (rightBit < 10)
+                hash_str[n * 2 + 1] = '0' + rightBit;
+            else
+                hash_str[n * 2 + 1] = 'a' - 10 + rightBit;
         }
-        str[n] = '\0';
-        printf("Copied %d bytes\n", n);
-        printf("Here is the hash_str\n");
-        for (int i = 0; i < n; i ++)
-            printf("%d-", hash_str[i]);
-//        printf(hash_str);
-//        printf("\n");
-        //print_hash((unsigned char *)hash_str);
-	//print_hash(str);
-//        printf("\nHash length - %d", strLength((char*)hash_str));
+        hash_str[n_len] = '\0';
+        printf("Here is the hash_str: %s\n", hash_str);
         sha256_init(&ctx);
-        printf("Finishing init");
-	sha256_update(&ctx, (char*)text1, SHA256_BLOCK_SIZE );
-        printf("Finishing update");
+	sha256_update(&ctx, hash_str, n_len);
 	sha256_final(&ctx, (char *) buf);
-        printf("Finished hash");
         int difficulty = 33;
         bool invalid = false;
-        //printf("%x", buf);
 	for (int i = 0; i < 32; i ++){
-//           printf("%c", (unsigned char*) buf[i]);
            unsigned int hexnum = (unsigned int) buf[i];
-//           printf("%x-", (unsigned int) hexnum );
            for (int j = 128; j >= 1; j= j / 2){
-//              printf("%d", hexnum & j);
               if (((int)hexnum & j) != 0){
-           //      printf("1");
                  invalid = true;
               } else {
-           //      printf("0");
                  difficulty --;
                  if (difficulty == 0)
                       break;
               }
               if (invalid || difficulty == 0)
                   break;
-              //printf("%d", ((unsigned int) buf[i]) & j); 
            }
            if (invalid || difficulty == 0)
                 break;
-           //printf("%d", (unsigned char*) buf[i]);
-           //printf("\nNext Bits\n");
         }
-        printf("Printing hash \n");
         print_hash(buf);
-        printf("Finished printing hash");
         if (invalid){
              printf("Not enough work done %d\n", difficulty);
              buf[0] = '\0';
-            
              memcpy(str, buf, SHA256_BLOCK_SIZE);
         }else{
              printf("YAY you found one");
@@ -449,13 +423,9 @@ __host__ void h_sha256_hash(char * str)
 {
       	unsigned char buf[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
-        printf("Starting sha hash \n");
 	h_sha256_init(&ctx);
-        printf("Finishing init");
 	h_sha256_update(&ctx, str, strLength(str));
-        printf("Finishing update");
 	h_sha256_final(&ctx, (char *) buf);
-        printf("Finished hash");
         int difficulty = 33;
         bool invalid = false;
 	for (int i = 0; i < 32; i ++){
@@ -486,8 +456,7 @@ __host__ void h_sha256_hash(char * str)
             
              memcpy(str, buf, SHA256_BLOCK_SIZE);
         }else{
-             printf("YAY you found one");
-             print_hash(buf);
+             printf("enough work done to satisfy difficulty \n");
              memcpy(str, buf, SHA256_BLOCK_SIZE);
         }
 }
@@ -601,16 +570,16 @@ int main(int argc, char **argv)
 //    testKernel<<<dimGrid, dimBlock>>>(10);
     char *tip = (char*) malloc(BUFSIZE);
     unsigned char * h_tip = (unsigned char*) malloc(SHA256_BLOCK_SIZE);
-    printf("Gettin tip");
+//    printf("Gettin tip");
     getTip(tip);
-    for (int i=0; i < 100; i++)
-       printf("%d_", tip[i]);
-    printf("\n");
+//    for (int i=0; i < 100; i++)
+//       printf("%d_", tip[i]);
+//    printf("\n");
 
     h_sha256_hash(tip);
-    for (int i= 0; i < SHA256_BLOCK_SIZE; i++)
-        printf("%d_", tip[i]);
-    printf("\n");
+//    for (int i= 0; i < SHA256_BLOCK_SIZE; i++)
+//        printf("%d_", tip[i]);
+//    printf("\n");
 //    h_tip = (unsigned char *) tip;
     memcpy(h_tip, tip, SHA256_BLOCK_SIZE);
     print_hash((unsigned char*)tip);
