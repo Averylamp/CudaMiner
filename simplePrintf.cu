@@ -358,7 +358,7 @@ __device__ int strlengthzero(char * str)
    return count;
 }
 
-__device__ void get_ending(unsigned char * buf, int threadID, int offset)
+__device__ void get_ending(unsigned char * buf, int threadID, int offset, int d_num)
 {
    int n = 0;
    char name[9] = {" turtle "};
@@ -367,7 +367,11 @@ __device__ void get_ending(unsigned char * buf, int threadID, int offset)
        buf[n] = name[i];
        n++;
    }
-    while (threadID != 0 || first){
+   buf[n] = '0' + d_num;
+   n++;
+   buf[n] = '/';
+   n++;
+   while (threadID != 0 || first){
        first = false;
        int nextNum = threadID % 10;
        unsigned char nextChar = '0' + nextNum;
@@ -389,7 +393,7 @@ __device__ void get_ending(unsigned char * buf, int threadID, int offset)
    buf[n] = '\0';
 }
 
-__device__ void sha256_hash(unsigned char * str, unsigned char * result, int threadNum, int offset)
+__device__ void sha256_hash(unsigned char * str, unsigned char * result, int threadNum, int offset, int d_num)
 {
       	unsigned char buf[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
@@ -414,7 +418,7 @@ __device__ void sha256_hash(unsigned char * str, unsigned char * result, int thr
         }
         
         char ending[36];
-        get_ending((unsigned char*) ending, threadNum, offset);
+        get_ending((unsigned char*) ending, threadNum, offset, d_num);
         for (int i = 0; i < strlengthzero(ending); i++){
             hash_str[64 + i] = ending[i];
             n_len ++;
@@ -442,7 +446,7 @@ __device__ void sha256_hash(unsigned char * str, unsigned char * result, int thr
            if (invalid || difficulty == 0)
                 break;
         }
-        if (offset % 10000 == 0 && threadNum == 0)
+        if (offset % 100 == 0 && threadNum == 0)
             printf("%s\n",hash_str);
         if (invalid){
              //printf("Not enough work done %d\n", difficulty);
@@ -490,15 +494,15 @@ __host__ void h_sha256_hash(char * str)
 }
 
 
-__global__ void testKernel(unsigned char *var, unsigned char * result, int offset)
+__global__ void testKernel(unsigned char *var, unsigned char * result, int offset, int d_num)
 {   
     bool first = true; 
-    while (offset % 10000 != 0 || first)
+    while (offset % 100 != 0 || first)
     {
         first = false;
         int threadNum = blockDim.x * blockIdx.x + threadIdx.x;
         //printf("Yay in gpu mode, Thread: %d\n", threadNum);
-        sha256_hash(var, result, threadNum,  offset);
+        sha256_hash(var, result, threadNum,  offset, d_num);
         offset ++;
         if (result[0] != '\0')
             break;
@@ -649,20 +653,18 @@ int main(int argc, char **argv)
     int GPU_N;
     checkCudaErrors(cudaGetDeviceCount(&GPU_N));
     printf("CUDA-capable device count: %i\n", GPU_N);
-
-
-
-
-
-
-
+    if(argc < 2)
+    {
+        printf("Missing argument, use -device to set gpu slot\n");
+        exit(-1);
+    }
 
     int devID;
     cudaDeviceProp props;
 
     // This will pick the best possible CUDA capable device
     devID = findCudaDevice(argc, (const char **)argv);
-
+    printf("Device: %d\n", devID);
     //Get GPU information
     checkCudaErrors(cudaGetDevice(&devID));
     checkCudaErrors(cudaGetDeviceProperties(&props, devID));
@@ -721,8 +723,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
     StartTimer();
-    testKernel<<<512,256>>>(d_tip, result, offset);
-    offset += 10000;
+    testKernel<<<1024,1024>>>(d_tip, result, offset, devID);
+    offset += 100;
     cudaDeviceSynchronize();
     printf("  GPU Processing time: %f (ms)\n\n", GetTimer());
     
