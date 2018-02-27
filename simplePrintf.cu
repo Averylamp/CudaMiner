@@ -585,6 +585,75 @@ void sendBlock(char * block)
 
 }
 
+int getScore()
+{
+    int sockfd, portno, n;
+    struct sockaddr_in serveraddr;
+    struct hostent *server;
+    char *hostname;
+    char buf[BUFSIZE];
+
+    /* check command line arguments */
+//    if (argc != 3) {
+//       fprintf(stderr,"usage: %s <hostname> <port>\n", argv[0]);
+      // exit(0);
+//    }
+//    hostname = argv[1];
+    hostname = (char*) "localhost\0";
+    hostname = (char*) "hubris.media.mit.edu\0";
+//    portno = atoi(argv[2]);
+    portno = 6299;
+
+    /* socket: create the socket */
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+        error((char *) "ERROR opening socket");
+
+    /* gethostbyname: get the server's DNS entry */
+    server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+        exit(0);
+    }
+
+    /* build the server's Internet address */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr,
+          (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+    serveraddr.sin_port = htons(portno);
+
+    /* connect: create a connection with the server */
+    if (connect(sockfd, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0)
+      error((char *) "ERROR connecting");
+
+    /* get message line from the user */
+//    printf("Please enter msg: ");
+    bzero(buf, BUFSIZE);
+    //fgets(buf, BUFSIZE, stdin);
+    sprintf(buf, "\n");
+    /* send the message line to the server */
+    n = write(sockfd, buf, strlen(buf));
+    if (n < 0)
+      error((char *) "ERROR writing to socket");
+
+    /* print the server's reply */
+    bzero(buf, BUFSIZE);
+    n = read(sockfd, buf, BUFSIZE);
+    if (n < 0)
+      error((char *) "ERROR reading from socket");
+    //printf("Returned tip: %s", buf);
+    printf("Current Score: ");
+    for (int i = 51; i < 55; i++)
+        printf("%c", buf[i]);
+    printf("\n");
+    close(sockfd);
+    if (buf[51] == '1' && buf[52] == '3' && buf[53] == '3' && buf[54] == '7')
+        return 1;
+
+    return 0;
+
+}
 
 void getTip(char * buf){
     int sockfd, portno, n;
@@ -649,7 +718,6 @@ void getTip(char * buf){
 
 int main(int argc, char **argv)
 {
-    
     int GPU_N;
     checkCudaErrors(cudaGetDeviceCount(&GPU_N));
     printf("CUDA-capable device count: %i\n", GPU_N);
@@ -670,12 +738,17 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaGetDeviceProperties(&props, devID));
     printf("Device %d: \"%s\" with Compute %d.%d capability\n",
            devID, props.name, props.major, props.minor);
-
+    int counter = 0;
 
     int offset = 0;
     char *lastTip = (char*) malloc(BUFSIZE);
     bzero(lastTip, BUFSIZE);
   while(true){
+    counter ++;
+    if (counter % 5 == 0){
+        if (getScore())
+            exit(0);
+    }
     char *tip = (char*) malloc(BUFSIZE);
     unsigned char * h_tip = (unsigned char*) malloc(SHA256_BLOCK_SIZE);
     getTip(tip);
